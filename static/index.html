@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxCoder // Voice-Powered Code Agent</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Matrix rain canvas (background) -->
+    <canvas id="matrix-bg"></canvas>
+
+    <!-- CRT scanline overlay -->
+    <div class="crt-overlay"></div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="brace">{</span><span class="mic-char">&#9673;</span><span class="brace">}</span>
+                <span class="brand">Vox<span class="accent">Coder</span></span>
+            </div>
+            <div class="version">v1.0.0</div>
+        </div>
+        <div class="header-center">
+            <div class="ascii-subtitle">
+                <span class="dim">[</span> VOICE-POWERED CODE AGENT <span class="dim">]</span>
+                <span class="cursor-blink">_</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="sys-stats">
+                <span class="stat"><span class="stat-label">SYS</span> <span class="stat-val" id="sys-clock">00:00:00</span></span>
+                <span class="stat"><span class="stat-label">REQ</span> <span class="stat-val" id="req-count">0</span></span>
+                <span class="stat"><span class="stat-label">TKN</span> <span class="stat-val" id="total-tokens">0</span></span>
+                <span class="stat"><span class="stat-label">WS</span> <span class="stat-val ws-status" id="ws-indicator">--</span></span>
+                <span class="stat cost-stat" id="cost-toggle" title="Click for cost breakdown">
+                    <span class="stat-label">COST</span>
+                    <span class="stat-val cost-val" id="total-cost">$0.000</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Cost breakdown panel (toggle) -->
+    <div class="cost-panel" id="cost-panel">
+        <div class="cost-panel-header">
+            <span class="terminal-prompt">&gt;_</span> COST BREAKDOWN
+            <span class="cost-panel-close" id="cost-panel-close">&#10005;</span>
+        </div>
+        <div class="cost-panel-body">
+            <!-- Audio / STT -->
+            <div class="cost-item">
+                <div class="cost-item-header">
+                    <span class="cost-item-label">
+                        <svg class="cost-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                        Voxtral Realtime
+                    </span>
+                    <span class="cost-item-val" id="cost-audio-usage">0.00 min</span>
+                </div>
+                <div class="cost-item-bar-container">
+                    <div class="cost-item-bar" id="bar-stt" style="width: 0%; background: var(--accent);"></div>
+                </div>
+                <div class="cost-item-footer">
+                    <span class="cost-item-price">$0.006/min</span>
+                    <span class="cost-amount" id="cost-stt">$0.000000</span>
+                </div>
+            </div>
+
+            <!-- Mistral Input -->
+            <div class="cost-item">
+                <div class="cost-item-header">
+                    <span class="cost-item-label">
+                        <svg class="cost-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        Mistral Large (in)
+                    </span>
+                    <span class="cost-item-val" id="cost-input-tokens">0 tkn</span>
+                </div>
+                <div class="cost-item-bar-container">
+                    <div class="cost-item-bar" id="bar-input" style="width: 0%; background: var(--cyan);"></div>
+                </div>
+                <div class="cost-item-footer">
+                    <span class="cost-item-price">$2.00/M</span>
+                    <span class="cost-amount" id="cost-input">$0.000000</span>
+                </div>
+            </div>
+
+            <!-- Mistral Output -->
+            <div class="cost-item">
+                <div class="cost-item-header">
+                    <span class="cost-item-label">
+                        <svg class="cost-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8l3 3-3 3"/><path d="M8 11h8"/></svg>
+                        Mistral Large (out)
+                    </span>
+                    <span class="cost-item-val" id="cost-output-tokens">0 tkn</span>
+                </div>
+                <div class="cost-item-bar-container">
+                    <div class="cost-item-bar" id="bar-output" style="width: 0%; background: var(--purple);"></div>
+                </div>
+                <div class="cost-item-footer">
+                    <span class="cost-item-price">$6.00/M</span>
+                    <span class="cost-amount" id="cost-output">$0.000000</span>
+                </div>
+            </div>
+
+            <!-- Code Interpreter -->
+            <div class="cost-item">
+                <div class="cost-item-header">
+                    <span class="cost-item-label">
+                        <svg class="cost-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        Code Interpreter
+                    </span>
+                    <span class="cost-item-val" id="cost-exec-count">0 runs</span>
+                </div>
+                <div class="cost-item-bar-container">
+                    <div class="cost-item-bar" id="bar-exec" style="width: 0%; background: var(--green);"></div>
+                </div>
+                <div class="cost-item-footer">
+                    <span class="cost-item-price">$0.030/run</span>
+                    <span class="cost-amount" id="cost-exec">$0.000000</span>
+                </div>
+            </div>
+
+            <div class="cost-total-row" style="display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid var(--border);">
+                <span style="color: var(--text-dim); letter-spacing: 1px; font-weight: 700;">SESSION TOTAL</span>
+                <span class="cost-amount cost-total" id="cost-session-total">$0.000000</span>
+            </div>
+
+            <div class="cost-last-req" id="cost-last-req"></div>
+        </div>
+    </div>
+
+    <!-- Main 3-panel layout -->
+    <main class="panels">
+        <!-- Transcript Panel -->
+        <section class="panel" id="panel-transcript">
+            <div class="panel-header">
+                <span class="terminal-prompt">&gt;_</span>
+                <span>voice_input.log</span>
+                <span class="panel-tag">STDIN</span>
+            </div>
+            <div class="panel-body" id="transcript-content">
+                <div class="boot-line"><span class="dim">// Awaiting voice input...</span></div>
+                <div class="boot-line"><span class="dim">// Hold [SPACE] or mic button to speak</span></div>
+            </div>
+        </section>
+
+        <!-- Code Panel -->
+        <section class="panel panel-main" id="panel-code">
+            <div class="panel-header">
+                <span class="terminal-prompt">&gt;_</span>
+                <span>generated.py</span>
+                <span class="panel-tag">CODE</span>
+            </div>
+            <div class="code-tabs-bar" id="code-tabs-bar"></div>
+            <div class="panel-body" id="code-content">
+                <div class="boot-line"><span class="dim">// Code generation pipeline ready</span></div>
+                <div class="boot-line"><span class="dim">// Powered by Mistral Agents API</span></div>
+            </div>
+        </section>
+
+        <!-- Output Panel -->
+        <section class="panel" id="panel-output">
+            <div class="panel-header">
+                <span class="terminal-prompt">&gt;_</span>
+                <span>exec_output.log</span>
+                <span class="panel-tag">STDOUT</span>
+            </div>
+            <div class="panel-body" id="output-content">
+                <div class="boot-line"><span class="dim">// Sandbox executor standing by</span></div>
+                <div class="boot-line"><span class="dim">// code_interpreter: active</span></div>
+            </div>
+        </section>
+
+        <!-- Preview Panel -->
+        <section class="panel" id="panel-preview">
+            <div class="panel-header">
+                <span class="terminal-prompt">&gt;_</span>
+                <span id="preview-panel-filename">live_preview.html</span>
+                <span class="panel-tag">PREVIEW</span>
+                <button id="btn-refresh-preview" class="copy-btn" style="margin-left: 10px;">REFRESH</button>
+                <span class="cost-panel-close" id="preview-panel-close" style="margin-left: auto;">&#10005;</span>
+            </div>
+            <div class="panel-body preview-container" id="preview-content">
+                <iframe id="preview-iframe" title="Live Preview" sandbox="allow-scripts"></iframe>
+                <div id="preview-code-display">
+                    <pre><code id="preview-code-el"></code></pre>
+                </div>
+                <div id="preview-image-display">
+                    <img id="preview-image" alt="Execution output" />
+                </div>
+                <div id="preview-placeholder" class="boot-line"><span class="dim">// Preview engine ready</span></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Controls bar -->
+    <footer class="controls">
+        <div class="controls-left">
+            <div class="waveform-container">
+                <canvas id="waveform" width="200" height="40"></canvas>
+            </div>
+        </div>
+
+        <div class="controls-center">
+            <button id="btn-mic" class="mic-btn" aria-label="Hold to talk">
+                <div class="mic-ring"></div>
+                <div class="mic-ring ring-2"></div>
+                <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm-1-9a1 1 0 1 1 2 0v6a1 1 0 1 1-2 0V5z"/>
+                    <path d="M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.93V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.07A7 7 0 0 0 19 11z"/>
+                </svg>
+                <span class="mic-label">HOLD TO TALK</span>
+            </button>
+            <div class="mic-hint">[SPACE]</div>
+        </div>
+
+        <div class="controls-right">
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">INITIALIZING</span>
+                </div>
+                <div class="pipeline-steps">
+                    <span class="step" id="step-mic">MIC</span>
+                    <span class="step-arrow">&#9654;</span>
+                    <span class="step" id="step-stt">STT</span>
+                    <span class="step-arrow">&#9654;</span>
+                    <span class="step" id="step-agent">AGENT</span>
+                    <span class="step-arrow">&#9654;</span>
+                    <span class="step" id="step-exec">EXEC</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
