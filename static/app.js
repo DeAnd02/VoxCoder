@@ -575,7 +575,6 @@ function updatePreview(code, language) {
 }
 
 function showPreviewImage(dataUri) {
-    // Show preview panel
     const panels = $(".panels");
     if (panels && !panels.classList.contains("with-preview")) {
         panels.classList.add("with-preview");
@@ -595,6 +594,12 @@ function showPreviewImage(dataUri) {
 
     img.src = dataUri;
     if (filenameEl) filenameEl.textContent = "exec_output.png";
+
+    // Scroll into view on mobile
+    const previewPanel = $("#panel-preview");
+    if (previewPanel && window.innerWidth <= 768) {
+        previewPanel.scrollIntoView({ behavior: "smooth" });
+    }
 }
 
 function renderPreview() {

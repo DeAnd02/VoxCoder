@@ -1,6 +1,5 @@
 """Mistral Agent creation & multi-turn conversation logic."""
 
-import json
 import logging
 import os
 import re
@@ -12,19 +11,19 @@ log = logging.getLogger("voxcoder.agent")
 
 AGENT_INSTRUCTIONS = """\
 You are VoxCoder, a voice-controlled pair programmer.
-The user speaks commands to you via voice (transcribed to text).
+The user speaks their request via voice (already transcribed to text).
+The platform executes code automatically and shows the output in a live preview.
 
-Rules:
-- When the user asks for simple code (e.g. algorithms, functions, simple logic), provide only the code block. Do NOT use the code interpreter unless specifically asked to test it.
-- If the user asks for complex tasks like creating a website, a web interface, or a full application with frontend and backend, output HTML, CSS, and JavaScript in separate or combined code blocks.
-- The platform supports a live "Preview" for web code (HTML/CSS/JS) and for execution output including images and plots.
-- When writing Python code that produces visual output (matplotlib, seaborn, plotly, PIL, pandas plots, charts, graphs, diagrams), ALWAYS execute it with the code interpreter so the plot/image appears in the Preview panel. Never skip execution for visualization code.
-- For simple Python code without visual output (algorithms, utilities, functions), provide only the code block without executing.
-- Keep responses extremely concise — the user is speaking, not typing.
-- If the user says something ambiguous, ask a SHORT clarifying question.
-- Support iterative development: the user can say "fix that", "add error handling", "make it faster" etc.
-- When the user says "save" or "export", output the final complete code.
-- Respond in the same language the user speaks (Italian or English).
+RULES:
+1. ALWAYS respond with a code block. Never describe code without writing it.
+2. For Python (scripts, graphs, algorithms, data, utilities): write complete runnable Python code in a ```python block.
+3. For graphs/plots/charts: use matplotlib. Use random or example data if not specified. Do NOT ask for data.
+4. For web apps/interfaces/websites: write a single self-contained HTML file (with embedded CSS and JS) in a ```html block.
+5. For Bash/shell tasks: write a ```bash block.
+6. NEVER use any tools. NEVER execute code yourself. Just output the code block — the platform runs it.
+7. Keep any explanation to one sentence max. The user is speaking, not reading.
+8. For follow-up requests ("fix it", "add labels", "make it blue"): output the full updated code.
+9. Respond in the same language the user speaks (Italian or English).
 """
 
 _client: Mistral | None = None
@@ -44,10 +43,6 @@ class AgentSession:
     conversation_id: str | None = None
 
 
-# Robust regex for markdown code blocks
-_CODE_BLOCK_RE = re.compile(r"```(?P<lang>\w+)?\s*\n?(?P<code>.*?)```", re.DOTALL)
-
-
 @dataclass
 class UsageInfo:
     """Token usage from a single agent call."""
@@ -63,90 +58,8 @@ class AgentResponse:
     text: str = ""
     code_blocks: list[dict] = field(default_factory=list)
     output: str = ""
-    images: list[str] = field(default_factory=list)  # base64 data URIs from code_interpreter
+    images: list[str] = field(default_factory=list)
     usage: UsageInfo = field(default_factory=UsageInfo)
-
-
-def _extract_tool_output(output, text_out: list[str], image_out: list[str]) -> None:
-    """Recursively extract text and base64 images from code_interpreter output."""
-    if output is None:
-        return
-    if isinstance(output, str):
-        if output.strip():
-            text_out.append(output)
-        return
-    if isinstance(output, list):
-        for item in output:
-            _extract_tool_output_item(item, text_out, image_out)
-        return
-    # Fallback: stringify
-    s = str(output).strip()
-    if s:
-        text_out.append(s)
-
-
-def _as_data_uri(raw: str) -> str | None:
-    """Convert raw base64 or data URI to a usable data URI string."""
-    if not isinstance(raw, str) or not raw:
-        return None
-    if raw.startswith("data:image"):
-        return raw
-    # PNG magic bytes in base64 start with "iVBOR"; JPEG start with "/9j/"
-    if raw.startswith("iVBOR"):
-        return f"data:image/png;base64,{raw}"
-    if raw.startswith("/9j/"):
-        return f"data:image/jpeg;base64,{raw}"
-    return None
-
-
-def _extract_tool_output_item(item, text_out: list[str], image_out: list[str]) -> None:
-    """Handle a single content item (dict or SDK object) from code_interpreter."""
-    if isinstance(item, dict):
-        t = item.get("type", "")
-        if t == "text":
-            txt = item.get("text", "").strip()
-            if txt:
-                text_out.append(txt)
-        elif t in ("image_url", "image", "image_data"):
-            # Try every plausible key that could hold the image
-            for key in ("image_url", "url", "data", "image_data", "src"):
-                raw = item.get(key, "")
-                if isinstance(raw, dict):
-                    raw = raw.get("url", raw.get("data", ""))
-                uri = _as_data_uri(raw)
-                if uri:
-                    image_out.append(uri)
-                    log.info(f"[parse] image extracted from dict key='{key}' len={len(uri)}")
-                    break
-        else:
-            for key in ("text", "content", "value"):
-                val = item.get(key)
-                if isinstance(val, str) and val.strip():
-                    text_out.append(val.strip())
-                    break
-    else:
-        # SDK object — try all likely attribute names
-        item_type = getattr(item, "type", None)
-        if item_type == "text":
-            txt = getattr(item, "text", "")
-            if txt and txt.strip():
-                text_out.append(txt.strip())
-        elif item_type in ("image_url", "image", "image_data"):
-            for attr in ("image_url", "url", "data", "image_data", "src"):
-                raw = getattr(item, attr, None)
-                if raw is None:
-                    continue
-                if hasattr(raw, "url"):
-                    raw = raw.url
-                uri = _as_data_uri(str(raw))
-                if uri:
-                    image_out.append(uri)
-                    log.info(f"[parse] image extracted from obj attr='{attr}' len={len(uri)}")
-                    break
-        elif hasattr(item, "text") and item.text:
-            text_out.append(str(item.text).strip())
-        elif hasattr(item, "content") and item.content:
-            _extract_tool_output(item.content, text_out, image_out)
 
 
 async def create_agent() -> str:
@@ -155,11 +68,11 @@ async def create_agent() -> str:
     agent = await client.beta.agents.create_async(
         model="mistral-large-latest",
         name="VoxCoder",
-        description="A voice-controlled coding assistant that writes and executes Python code.",
+        description="A voice-controlled coding assistant that writes code for local execution.",
         instructions=AGENT_INSTRUCTIONS,
-        tools=[{"type": "code_interpreter"}],
+        tools=[],
         completion_args={
-            "temperature": 0.3,
+            "temperature": 0.2,
             "top_p": 0.9,
         },
     )
@@ -167,108 +80,56 @@ async def create_agent() -> str:
 
 
 def _parse_response(response) -> AgentResponse:
-    """Extract text, code blocks, execution output, and usage from response."""
+    """Extract text and code blocks from agent response (no tool outputs)."""
     result = AgentResponse()
     text_parts: list[str] = []
-    output_parts: list[str] = []
-    code_exec_count = 0
 
-    log.debug(f"Parsing response from Mistral. Outputs: {response.outputs if hasattr(response, 'outputs') else 'No outputs'}")
-
-    # Robust extraction of outputs
     outputs = getattr(response, "outputs", [])
-    if not outputs:
-        # Fallback for other response types
-        log.warning("Response has no 'outputs' attribute. Attempting fallback.")
-        if hasattr(response, "content"):
-             outputs = [response] # Treat the response itself as an entry
+    if not outputs and hasattr(response, "content"):
+        outputs = [response]
 
-    for idx, entry in enumerate(outputs):
-        log.debug(f"Output entry {idx} type: {type(entry).__name__}")
-        
-        # Check for direct text content
+    for entry in outputs:
         content = getattr(entry, "content", None)
         if content:
             if isinstance(content, str):
                 text_parts.append(content)
             elif isinstance(content, list):
-                for p_idx, part in enumerate(content):
+                for part in content:
                     if hasattr(part, "text") and part.text:
                         text_parts.append(part.text)
-                    elif hasattr(part, "code") and part.code:
-                        result.code_blocks.append({
-                            "language": getattr(part, "language", "python"), 
-                            "content": part.code
-                        })
                     elif isinstance(part, str):
                         text_parts.append(part)
-        
-        # Check for text attribute
         elif hasattr(entry, "text") and entry.text:
-             text_parts.append(entry.text)
-
-        # Log entry type for debugging
-        entry_typename = type(entry).__name__
-        log.info(f"[parse] entry[{idx}] type={entry_typename}")
-
-        # Check for tool execution outputs (text + images)
-        if hasattr(entry, "output") and entry.output is not None:
-            log.info(f"[parse] tool output at [{idx}]: {repr(entry.output)[:500]}")
-            _extract_tool_output(entry.output, output_parts, result.images)
-
-        # Check for tool calls (built-in code_interpreter appears differently)
-        if hasattr(entry, "tool_calls") and entry.tool_calls:
-            for call in entry.tool_calls:
-                fn_name = getattr(getattr(call, "function", None), "name", "") or ""
-                if fn_name == "code_interpreter":
-                    try:
-                        args = json.loads(call.function.arguments)
-                        if "code" in args:
-                            result.code_blocks.append({
-                                "language": "python",
-                                "content": args["code"]
-                            })
-                    except Exception:
-                        pass
-
-        # Count code executions — match by substring to handle SDK version differences
-        if any(k in entry_typename for k in ("ToolExecution", "CodeInterpreter", "ToolResult")):
-            code_exec_count += 1
-            log.info(f"[parse] code execution detected at entry [{idx}]")
+            text_parts.append(entry.text)
 
     full_text = "\n".join(text_parts).strip()
     result.text = full_text
+    log.info("[parse] full_text length=%d", len(full_text))
 
-    # Extract markdown code blocks from the full text
-    # We use a very lenient regex to catch as much as possible
+    # Extract markdown code blocks
     blocks = re.findall(r"```(\w+)?\s*\n?(.*?)```", full_text, re.DOTALL)
     for lang, code in blocks:
-        lang = lang.lower() if lang else ""
+        lang = lang.lower().strip() if lang else ""
         code = code.strip()
-        
+        if not code:
+            continue
         if not lang:
-            if "<html>" in code.lower() or "<div>" in code.lower():
+            if "<html" in code.lower() or "<!doctype" in code.lower():
                 lang = "html"
             else:
                 lang = "python"
-        
-        if not any(b["content"] == code for b in result.code_blocks):
-            result.code_blocks.append({"language": lang, "content": code})
+        result.code_blocks.append({"language": lang, "content": code})
 
-    if output_parts:
-        result.output = "\n".join(output_parts)
+    log.info("[parse] found %d code block(s)", len(result.code_blocks))
 
-    if output_parts:
-        result.output = "\n".join(output_parts)
-
-    # Extract usage
+    # Usage
     if hasattr(response, "usage") and response.usage:
         u = response.usage
         result.usage = UsageInfo(
             prompt_tokens=u.prompt_tokens or 0,
             completion_tokens=u.completion_tokens or 0,
             total_tokens=u.total_tokens or 0,
-            code_executions=code_exec_count,
+            code_executions=0,
         )
 
     return result

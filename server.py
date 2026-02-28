@@ -146,11 +146,11 @@ async def websocket_endpoint(ws: WebSocket):
                     EXEC_LANGS = {"python", "py", "bash", "sh"}
 
                     for block in agent_resp.code_blocks:
-                        lang = block.get("language", "python")
+                        lang = block.get("language", "python").lower()
                         await _send(ws, "code", language=lang, content=block["content"])
 
-                        # Auto-execute Python/Bash code blocks locally
-                        if lang.lower() in EXEC_LANGS:
+                        # Execute Python/Bash locally
+                        if lang in EXEC_LANGS:
                             await _send(ws, "status", status="executing", message="Executing code…")
                             exec_result = await execute_python(block["content"])
                             if exec_result.installed:
@@ -161,13 +161,6 @@ async def websocket_endpoint(ws: WebSocket):
                                 await _send(ws, "image", data=img_data)
                             if exec_result.error:
                                 await _send(ws, "output", content=f"[stderr]\n{exec_result.error}")
-
-                    # Images from Mistral's code_interpreter (if any)
-                    if agent_resp.output:
-                        await _send(ws, "output", content=agent_resp.output)
-
-                    for img_data in agent_resp.images:
-                        await _send(ws, "image", data=img_data)
 
                     if agent_resp.text:
                         # Send text message to the UI
